@@ -10,10 +10,28 @@ lenchr1 = 3046494
 reflaneid = '33224_2#241'
 
 cargs = commandArgs(trailingOnly=T)
+if (length(cargs)<3){
+	print("Usage: find_new_isolate_specific_SNPs.r VCFfile full.tree.file [refclade1.tag=]refclade1.file,[testclade1.tag=]testclade1.file [[refclade2.tag=]refclade2.file,[testclade2.tag=]testclade2.file [, ...]]", quote=F)
+}
 nfvcf = cargs[1]
 nffulltree = cargs[2]
-nfmainclade = cargs[3]
-nfclade2018 = cargs[4]
+lnfclades = cargs[3:length(cargs)]
+# process arguments to recover dataset tags
+refstests = strsplit(lnfclades, split=',')
+tagnfclades = lapply(1:length(refstests), function(k){
+	s = refstests[[k]]
+	if (length(s) != 2){ stop(sprintf("expected a string containing 2 clade files in Newick format separated by a comma; got: '%s'", paste(s,collapse=','))) }
+	tagnf = sapply(strsplit(s, split='='), function(tn){
+		if (length(tn)==1) return(c(NA, tn))
+		else return(tn[1:2]) 
+	})
+	lnf = tagnf[2,]
+	names(lnf) = ifelse(is.na(tagnf[1,]), paste(c("reference.clade", "test.clade"), k, sep='.'), tagnf[1,])
+	return(lnf)
+})
+
+fulltree = read.tree(nffulltree)
+fulltree.cols = laneid2col(fulltree[['tip.label']])
 
 snps = read.table(nfvcf, comment.char='', sep='\t', header=T, skip=3)
 if (grepl('chr2', nfvcf)){ 
@@ -33,91 +51,79 @@ if (grepl('chr2', nfvcf)){
 	snps[snps[,2]>lenchr1,1] = 2
 	snps[,2] = ifelse(snps[,2]>lenchr1, (snps[,2] - lenchr1), snps[,2])
 }
-fulltree = read.tree(nffulltree)
-mainclade = read.tree(nfmainclade)
-clade2018 = read.tree(nfclade2018)
 
-fulltree.cols = laneid2col(fulltree[['tip.label']])
-mainclade.cols = laneid2col(mainclade[['tip.label']]) # includes ref
-clade2018.cols = laneid2col(clade2018[['tip.label']])
+snpcontrasts = list()
+snpfreqvec = list()
 
-# main (main yemen cholera clone) vs bg (Yemen divergent isolates)
-bgclade.cols = setdiff(fulltree.cols, mainclade.cols)
-mainclade.snp.mat = snps[,mainclade.cols]
-bgclade.snp.mat = snps[, bgclade.cols]
-snp.freq.bg = apply(bgclade.snp.mat, 1, sum) / length(bgclade.cols)
-snp.freq.main = apply(mainclade.snp.mat, 1, sum) / length(mainclade.cols)
-uniquevar.bgvsmainclade = (snp.freq.bg>0.8 & snp.freq.main<0.2)
-uniquevar.mainvsbgclade = (snp.freq.main>0.8 & snp.freq.bg<0.2)
-contrast.mainvsbgclade = uniquevar.mainvsbgclade | uniquevar.bgvsmainclade
-#var.in.mainclade = apply(mainclade.snp.mat, 1, sum)>0
-#mainclade.filt.snp.mat = mainclade.snp.mat[var.in.mainclade | contrast.mainvsbgclade,]
-#bgclade.filt.snp.mat = bgclade.snp.mat[var.in.mainclade | contrast.mainvsbgclade,]
+for (tagnf in tagnfclades){
+nfrefclade = tagnf[[1]]
+nftestclade = tagnf[[2]]
+reftag = names(tagnf)[1]
+testtag = names(tagnf)[2]
+bgfulltag = sprintf("bg(full|%s)", reftag)
+bgreftag = sprintf("bg(%s|%s)", reftag, testtag)
+	
+	
+refclade = read.tree(nfrefclade)
+testclade = read.tree(nftestclade)
 
-# previous (clade with mostly 2016-2017 Yemen isolates) vs. new (clade with mostly 2018-2019 Yemen isolates)
-prevclade.samples = grepl("^CNRVC", mainclade.cols) | (mainclade.cols %in% c("X33224_2.7", "X33224_2.33"))
-prevclade.cols = mainclade.cols[prevclade.samples]
-newclade.cols = mainclade.cols[!prevclade.samples] # includes ref
-print("prevclade.cols")
-print(prevclade.cols)
-print("newclade.cols")
-print(newclade.cols)
+refclade.cols = laneid2col(refclade[['tip.label']])
+testclade.cols = laneid2col(testclade[['tip.label']])
 
-newclade.snp.mat = snps[,newclade.cols]
-prevclade.snp.mat = snps[, prevclade.cols]
-snp.freq.prev = apply(prevclade.snp.mat, 1, sum) / length(prevclade.cols)
-snp.freq.new = apply(newclade.snp.mat, 1, sum) / length(newclade.cols)
-uniquevar.prevvsnewclade = (snp.freq.prev>0.8 & snp.freq.new<0.2)
-uniquevar.newvsprevclade = (snp.freq.new>0.8 & snp.freq.prev<0.2)
-contrast.newvsprevclade = uniquevar.newvsprevclade | uniquevar.prevvsnewclade
+# ref clade (may include test clade) vs background (rest of the tree)
+bgfull.cols = setdiff(fulltree.cols, refclade.cols)
+refclade.snp.mat = snps[,refclade.cols]
+bgfull.snp.mat = snps[, bgfull.cols]
+snp.freq.bgfull = apply(bgfull.snp.mat, 1, sum) / length(bgfull.cols)
+snp.freq.ref = apply(refclade.snp.mat, 1, sum) / length(refclade.cols)
+uniquevar.bgfullvsref = (snp.freq.bgfull>0.8 & snp.freq.ref<0.2)
+uniquevar.refvsbgfull = (snp.freq.ref>0.8 & snp.freq.bgfull<0.2)
+snpcontrast.refvsbgfull = uniquevar.refvsbgfull | uniquevar.bgfullvsref
+#var.in.refclade = apply(refclade.snp.mat, 1, sum)>0
+#refclade.filt.snp.mat = refclade.snp.mat[var.in.refclade | snpcontrast.refvsbgfull,]
+#bgfull.filt.snp.mat = bgfull.snp.mat[var.in.refclade | snpcontrast.refvsbgfull,]
 
-## 2018 vs the bg of main
-#clade2018.snp.mat = snps[,clade2018.cols]
-#bgmainclade.snp.mat = snps[, setdiff(mainclade.cols, clade2018.cols)]
-#unique.2018vsbgmainclade = (apply(clade2018.snp.mat, 1, sum)>0.8 & apply(bgmainclade.snp.mat, 1, sum)<0.2)
-#unique.bgmainvs2018clade = (apply(bgmainclade.snp.mat, 1, sum)>0.8 & apply(clade2018.snp.mat, 1, sum)<0.2)
-#contrast.mainvsbgclade = unique.2018vsbgmainclade | unique.bgmainvs2018clade
-#clade2018.filt.snp.mat = clade2018.snp.mat[var.in.mainclade | contrast.mainvsbgclade,]
-#bgmainclade.filt.snp.mat = bgmainclade.snp.mat[var.in.mainclade | contrast.mainvsbgclade,]
+# test clade vs background of ref clade (rest of the tree)
+bgref.cols = setdiff(refclade.cols, testclade.cols)
+testclade.snp.mat = snps[,testclade.cols]
+bgref.snp.mat = snps[, bgref.cols]
+snp.freq.bgref = apply(bgref.snp.mat, 1, sum) / length(bgref.cols)
+snp.freq.test = apply(testclade.snp.mat, 1, sum) / length(testclade.cols)
+uniquevar.bgrefvstest = (snp.freq.bgref>0.8 & snp.freq.test<0.2)
+uniquevar.testvsbgref = (snp.freq.test>0.8 & snp.freq.bgref<0.2)
+snpcontrast.testvsbgref = uniquevar.testvsbgref | uniquevar.bgrefvstest
+#var.in.testclade = apply(testclade.snp.mat, 1, sum)>0
+#tesstclade.filt.snp.mat = testclade.snp.mat[var.in.testclade | snpcontrast.testvsbgref,]
+#bgref.filt.snp.mat = bgref.snp.mat[var.in.testclade | snpcontrast.testvsbgref,]
+newsnpcontrasts = list(snpcontrast.refvsbgfull, snpcontrast.testvsbgref)
+names(newsnpcontrasts) = c(sprintf("%s.vs.full", reftag), sprintf("%s.vs.%s", testtag, reftag))
+snpcontrasts = c(snpcontrasts, newsnpcontrasts)
 
-# 2018 (clade with only and almost all 2018 isolates) vs the bg of new
-print("clade2018.cols")
-print(clade2018.cols)
-samples.2018 = mainclade.cols %in% clade2018.cols
-bgnewclade.cols = setdiff(newclade.cols, clade2018.cols) # includes ref
-print("bgnewclade.cols")
-print(bgnewclade.cols)
-clade2018.snp.mat = snps[,clade2018.cols]
-bgnewclade.snp.mat = snps[, bgnewclade.cols]
-snp.freq.bgnew = apply(bgnewclade.snp.mat, 1, sum) / length(bgnewclade.cols)
-snp.freq.2018 = apply(clade2018.snp.mat, 1, sum) / length(clade2018.cols)
-uniquevar.2018vsbgnewclade = (snp.freq.2018>0.8 & snp.freq.bgnew<0.2)
-uniquevar.bgnewvs2018clade = (snp.freq.bgnew>0.8 & snp.freq.2018<0.2)
-contrast.2018vsbgnewclade = uniquevar.2018vsbgnewclade | uniquevar.bgnewvs2018clade
-#clade2018.filt.snp.mat = clade2018.snp.mat[var.in.mainclade | contrast.2018vsbgnewclade,]
-#bgnewclade.filt.snp.mat = bgnewclade.snp.mat[var.in.mainclade | contrast.2018vsbgnewclade,]
+newsnpfreqvec = list(snp.freq.bgfull, snp.freq.ref, snp.freq.bgref, snp.freq.test)
+names(newsnpfreqvec) = c(reftag, bgfulltag, testtag, bgreftag)
+snpfreqvec = c(snpfreqvec, newsnpfreqvec)
 
-dataset.lengths = c(length(fulltree.cols), length(mainclade.cols), length(bgclade.cols), length(prevclade.cols), length(newclade.cols), length(bgnewclade.cols), length(clade2018.cols))
-names(dataset.lengths) = c("full.tree", "main.Yemen.clone.clade", "background.divergent.clade", "mostly2016-2017.sample.clade", "mostly2018-2019.sample.clade", "mostly2019.sample.clade", "2018.sample.clade")
-print("dataset.lengths")
-print(dataset.lengths)
+dataset.sizes = c(length(fulltree.cols), length(refclade.cols), length(bgfull.cols), length(testclade.cols), length(bgref.cols))
+names(dataset.sizes) = c("full.tree", reftag, bgfulltag, testtag, bgreftag)
+print("dataset sizes:")
+print(dataset.sizes)
+			   
+}
+combinedsnpcontrasts = rep(F, nrow(snps))
+for (snpcontrast in snpcontrasts){
+	combinedsnpcontrasts = combinedsnpcontrasts | snpcontrast
+}
+snpcontrasts = c(snpcontrasts, combinedsnpcontrasts)
+names(snpcontrasts)[length(snpcontrasts)] = 'combined'
 
-#fixed.snps = which(snp.freq.prev>0.8 | snp.freq.new>0.8 | snp.freq.2018>0.8 | snp.freq.bgnew>0.8)
-combined.contrasts = which(contrast.mainvsbgclade | contrast.newvsprevclade | contrast.2018vsbgnewclade)
-
-constrasts = list(bgVSmain=contrast.mainvsbgclade,
-				  prevVSnew=contrast.newvsprevclade,
-				  bgnewVS2018=contrast.2018vsbgnewclade,
-				  allcontrasts=combined.contrasts)
-for (contrasttag in names(constrasts)){
-  fixed.snps = constrasts[[contrasttag]]
+for (snpcontrasttag in names(snpcontrasts)){
+  fixed.snps = snpcontrasts[[snpcontrasttag]]
   fixed.snps.i = as.numeric(rownames(snps)[fixed.snps])
-  fixed.snps.info = cbind(snps[fixed.snps.i,c(1:6)], pos.for.artemis[fixed.snps.i],
-						  snp.freq.bg[fixed.snps], snp.freq.main[fixed.snps],
-						  snp.freq.prev[fixed.snps], snp.freq.new[fixed.snps],
-						  snp.freq.bgnew[fixed.snps], snp.freq.2018[fixed.snps])
+  fixed.snps.info = cbind(snps[fixed.snps.i,1:6], 
+						  pos.for.artemis[fixed.snps.i],
+						  do.call(cbind, lapply(snpfreqvec, function(sfv){ sfv[fixed.snps] })))
 
-  colnames(fixed.snps.info) = gsub("\\[fixed\\.snps.*\\]", ".clade", colnames(fixed.snps.info)) 
-  write.table(format(fixed.snps.info, digits=5), file=paste0(nfvcf, sprintf(".%s.fixed.snps.tab", contrasttag)),
+  colnames(fixed.snps.info) = c(colnames(fixed.snps.info)[1:6], names(snpfreqvec)) 
+  write.table(format(fixed.snps.info, digits=5), file=paste0(nfvcf, sprintf(".%s.fixed.snps.tab", snpcontrasttag)),
 			  sep='\t', row.names=F, quote=FALSE)
 }
