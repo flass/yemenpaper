@@ -11,7 +11,7 @@ reflaneid = '33224_2#241'
 
 cargs = commandArgs(trailingOnly=T)
 if (length(cargs)<3){
-	print("Usage: find_new_isolate_specific_SNPs.r VCFfile full.tree.file [refclade1.tag=]refclade1.file,[testclade1.tag=]testclade1.file [[refclade2.tag=]refclade2.file,[testclade2.tag=]testclade2.file [, ...]]", quote=F)
+	print("Usage: find_clade_specific_SNPs.r VCFfile full.tree.file [refclade1.tag=]refclade1.file,[testclade1.tag=]testclade1.file [[refclade2.tag=]refclade2.file,[testclade2.tag=]testclade2.file [, ...]]", quote=F)
 }
 nfvcf = cargs[1]
 nffulltree = cargs[2]
