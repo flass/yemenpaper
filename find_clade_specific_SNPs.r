@@ -11,7 +11,7 @@ reflaneid = '33224_2#241'
 
 cargs = commandArgs(trailingOnly=T)
 if (length(cargs)<3){
-	print("Usage: find_clade_specific_SNPs.r VCFfile full.tree.file [refclade1.tag=]refclade1.file,[testclade1.tag=]testclade1.file [[refclade2.tag=]refclade2.file,[testclade2.tag=]testclade2.file [, ...]]", quote=F)
+	print("Usage: find_new_isolate_specific_SNPs.r VCFfile full.tree.file [refclade1.tag=]refclade1.file,[testclade1.tag=]testclade1.file [[refclade2.tag=]refclade2.file,[testclade2.tag=]testclade2.file [, ...]]", quote=F)
 }
 nfvcf = cargs[1]
 nffulltree = cargs[2]
@@ -53,7 +53,8 @@ if (grepl('chr2', nfvcf)){
 }
 
 snpcontrasts = list()
-snpfreqvec = list()
+snp.freq.full = apply(snps[,fulltree.cols], 1, sum) / length(fulltree.cols)
+snpfreqvec = list(snp.freq.full.tree=snp.freq.full)
 
 for (tagnf in tagnfclades){
 nfrefclade = tagnf[[1]]
@@ -99,8 +100,8 @@ newsnpcontrasts = list(snpcontrast.refvsbgfull, snpcontrast.testvsbgref)
 names(newsnpcontrasts) = c(sprintf("%s.vs.full", reftag), sprintf("%s.vs.%s", testtag, reftag))
 snpcontrasts = c(snpcontrasts, newsnpcontrasts)
 
-newsnpfreqvec = list(snp.freq.bgfull, snp.freq.ref, snp.freq.bgref, snp.freq.test)
-names(newsnpfreqvec) = c(reftag, bgfulltag, testtag, bgreftag)
+newsnpfreqvec = list(snp.freq.ref, snp.freq.bgfull, snp.freq.test, snp.freq.bgref)
+names(newsnpfreqvec) = paste("snp.freq", c(reftag, bgfulltag, testtag, bgreftag), sep='.')
 snpfreqvec = c(snpfreqvec, newsnpfreqvec)
 
 dataset.sizes = c(length(fulltree.cols), length(refclade.cols), length(bgfull.cols), length(testclade.cols), length(bgref.cols))
@@ -109,12 +110,6 @@ print("dataset sizes:")
 print(dataset.sizes)
 			   
 }
-combinedsnpcontrasts = rep(F, nrow(snps))
-for (snpcontrast in snpcontrasts){
-	combinedsnpcontrasts = combinedsnpcontrasts | snpcontrast
-}
-snpcontrasts = c(snpcontrasts, combinedsnpcontrasts)
-names(snpcontrasts)[length(snpcontrasts)] = 'combined'
 
 for (snpcontrasttag in names(snpcontrasts)){
   fixed.snps = snpcontrasts[[snpcontrasttag]]
@@ -123,7 +118,7 @@ for (snpcontrasttag in names(snpcontrasts)){
 						  pos.for.artemis[fixed.snps.i],
 						  do.call(cbind, lapply(snpfreqvec, function(sfv){ sfv[fixed.snps] })))
 
-  colnames(fixed.snps.info) = c(colnames(fixed.snps.info)[1:6], names(snpfreqvec)) 
+  colnames(fixed.snps.info) = c(colnames(fixed.snps.info)[1:6], 'pos.for.artemis', names(snpfreqvec)) 
   write.table(format(fixed.snps.info, digits=5), file=paste0(nfvcf, sprintf(".%s.fixed.snps.tab", snpcontrasttag)),
 			  sep='\t', row.names=F, quote=FALSE)
 }
