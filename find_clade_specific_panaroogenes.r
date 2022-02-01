@@ -33,8 +33,22 @@ sanglane2assid = function(inid, outidset, ref=sangerids, incol='Lane', outcol='S
 cargs = commandArgs(trailingOnly=T)
 dirpanaroo = cargs[1]
 nffulltree = cargs[2]
-nfmainclade = cargs[3]
-nfclade2018 = cargs[4]
+lnfclades = cargs[3:length(cargs)]
+# process arguments to recover dataset tags
+refstests = strsplit(lnfclades, split=',')
+tagnfclades = lapply(1:length(refstests), function(k){
+	s = refstests[[k]]
+	if (length(s) != 2){ stop(sprintf("expected a string containing 2 clade files in Newick format separated by a comma; got: '%s'", paste(s,collapse=','))) }
+	tagnf = sapply(strsplit(s, split='='), function(tn){
+		if (length(tn)==1) return(c(NA, tn))
+		else return(tn[1:2]) 
+	})
+	lnf = tagnf[2,]
+	names(lnf) = ifelse(is.na(tagnf[1,]), paste(c("reference.clade", "test.clade"), k, sep='.'), tagnf[1,])
+	return(lnf)
+})
+fulltree = read.tree(nffulltree)
+fulltree.cols = laneid2col(fulltree[['tip.label']])
 
 # Pangenome abs/pres profiles
 panarooannot = read.csv(file.path(dirpanaroo, 'gene_annotations.csv'), comment.char='', header=T)
@@ -49,45 +63,13 @@ npanacols = ncol(panaroopangenomegenes)
 stopifnot(all(colnames(panaroopangenomegenes) == colnames(panaroopangenomestruct)))
 stopifnot(all(panarooannot[,'Gene'] == panaroopangenomegenes[,'Gene']))
 stopifnot(all(panaroorefloctag[,'Gene'] == panaroopangenomegenes[,'Gene']))
-panaroopangenomegenes = merge(panaroopangenomegenes, panarooannot)
-panaroopangenomegenes = merge(panaroopangenomegenes, panaroorefloctag)
-print(head(colnames(panaroopangenomegenes)))
+panaroopangenomegenes = merge(panaroopangenomegenes, panarooannot, by='Gene')
+panaroopangenomegenes = merge(panaroopangenomegenes, panaroorefloctag, by='Gene')
 colpanaroo2isol = col2laneid(colnames(panaroopangenomegenes)[2:npanacols])
 isol2colpanaroo = colnames(panaroopangenomegenes)[2:npanacols]
 names(isol2colpanaroo) = colpanaroo2isol
-
-fulltree = read.tree(nffulltree)
-mainclade = read.tree(nfmainclade) # includes ref
-clade2018 = read.tree(nfclade2018)
-
 panacolingenomes = which(colpanaroo2isol %in% fulltree$tip.label)
-
 fulltree.cols = intersect(sapply(fulltree$tip.label, sanglane2assid, outidset=colpanaroo2isol), colpanaroo2isol)
-mainclade.cols = intersect(sapply(mainclade$tip.label, sanglane2assid, outidset=colpanaroo2isol), colpanaroo2isol)
-clade2018.cols = intersect(sapply(clade2018$tip.label, sanglane2assid, outidset=colpanaroo2isol), colpanaroo2isol)
-
-# previous (clade with mostly 2016-2017 Yemen isolates) vs. new (clade with mostly 2018-2019 Yemen isolates)
-bgclade.cols = setdiff(fulltree.cols, mainclade.cols)
-prevclade.samples = grepl("^CNRVC", mainclade.cols) | (mainclade.cols %in% c("X33224_2.7", "X33224_2.33"))
-prevclade.cols = mainclade.cols[prevclade.samples]
-print("prevclade.cols")
-print(prevclade.cols)
-newclade.cols = mainclade.cols[!prevclade.samples] # includes ref
-print("newclade.cols")
-print(newclade.cols)
-# 2018 (clade with only and almost all 2018 isolates) vs the bg of new
-print("clade2018.cols")
-print(clade2018.cols)
-samples.2018 = mainclade.cols %in% clade2018.cols
-bgnewclade.cols = setdiff(newclade.cols, clade2018.cols) # includes ref
-print("bgnewclade.cols")
-print(bgnewclade.cols)
-
-dataset.lengths = c(length(fulltree.cols), length(mainclade.cols), length(bgclade.cols), length(prevclade.cols), length(newclade.cols), length(bgnewclade.cols), length(clade2018.cols))
-names(dataset.lengths) = c("full.tree", "main.Yemen.clone.clade", "background.divergent.clade", "mostly2016-2017.sample.clade", "mostly2018-2019.sample.clade", "mostly2019.sample.clade", "2018.sample.clade")
-print("dataset.lengths")
-print(dataset.lengths)
-
 
 panatabs = list(gene=panaroopangenomegenes, struct=panaroopangenomestruct)
 
@@ -97,75 +79,85 @@ for (npanatab in names(panatabs)){
 	colnames(panamat) = colpanaroo2isol[panacolingenomes]
 	panamatfreq = as.double(apply(panamat, 1, sum, na.rm=T)) / ncol(panamat)
 	midfreqs = which((panamatfreq > 0.02) & (panamatfreq < 0.98))
-	panamat = panamat[midfreqs,]
-	pananames = panatab[midfreqs,1]
 	if ("Annotation" %in% colnames(panatab)){
 		panannot = panatab[midfreqs,c("Annotation", refltcol)]
 	}else{ panannot = NULL }
-	print(sprintf('    size of pangenome %s presence/absence matrix: %d, %d', npanatab, nrow(panamat), ncol(panamat)), quote=F)
+	panamat = panamat[midfreqs,]
+	pananames = panatab[midfreqs,1]
+	print(sprintf('    size of intermediate frequency (.02-.98) pangenome %s presence/absence matrix: %d, %d', npanatab, nrow(panamat), ncol(panamat)), quote=F)
+	
+	accgenecontrasts = list()
+	accgene.freq.full = panamatfreq[midfreqs]
+	accgenefreqvec = list(accgene.freq.fulltree=accgene.freq.full)
 
-	# main (main yemen cholera clone) vs bg (Yemen divergent isolates)
-	mainclade.accgene.mat = panamat[,mainclade.cols]
-	bgclade.accgene.mat = panamat[, bgclade.cols]
-	accgene.freq.bg = apply(bgclade.accgene.mat, 1, sum) / length(bgclade.cols)
-	accgene.freq.main = apply(mainclade.accgene.mat, 1, sum) / length(mainclade.cols)
-	uniquevar.bgvsmainclade = (accgene.freq.bg>0.8 & accgene.freq.main<0.2)
-	uniquevar.mainvsbgclade = (accgene.freq.main>0.8 & accgene.freq.bg<0.2)
-	contrast.mainvsbgclade = uniquevar.mainvsbgclade | uniquevar.bgvsmainclade
-	#var.in.mainclade = apply(mainclade.accgene.mat, 1, sum)>0
-	#mainclade.filt.accgene.mat = mainclade.accgene.mat[var.in.mainclade | contrast.mainvsbgclade,]
-	#bgclade.filt.accgene.mat = bgclade.accgene.mat[var.in.mainclade | contrast.mainvsbgclade,]
 
-	# previous (clade with mostly 2016-2017 Yemen isolates) vs. new (clade with mostly 2018-2019 Yemen isolates)
-	newclade.accgene.mat = panamat[,newclade.cols]
-	prevclade.accgene.mat = panamat[, prevclade.cols]
-	accgene.freq.prev = apply(prevclade.accgene.mat, 1, sum) / length(prevclade.cols)
-	accgene.freq.new = apply(newclade.accgene.mat, 1, sum) / length(newclade.cols)
-	uniquevar.prevvsnewclade = (accgene.freq.prev>0.8 & accgene.freq.new<0.2)
-	uniquevar.newvsprevclade = (accgene.freq.new>0.8 & accgene.freq.prev<0.2)
-	contrast.newvsprevclade = uniquevar.newvsprevclade | uniquevar.prevvsnewclade
+	for (tagnf in tagnfclades){
+		nfrefclade = tagnf[[1]]
+		nftestclade = tagnf[[2]]
+		reftag = names(tagnf)[1]
+		testtag = names(tagnf)[2]
+		bgfulltag = sprintf("bg(full|%s)", reftag)
+		bgreftag = sprintf("bg(%s|%s)", reftag, testtag)
 
-	## 2018 vs the bg of main
-	#clade2018.accgene.mat = panamat[,clade2018.cols]
-	#bgmainclade.accgene.mat = panamat[, setdiff(mainclade.cols, clade2018.cols)]
-	#unique.2018vsbgmainclade = (apply(clade2018.accgene.mat, 1, sum)>0.8 & apply(bgmainclade.accgene.mat, 1, sum)<0.2)
-	#unique.bgmainvs2018clade = (apply(bgmainclade.accgene.mat, 1, sum)>0.8 & apply(clade2018.accgene.mat, 1, sum)<0.2)
-	#contrast.mainvsbgclade = unique.2018vsbgmainclade | unique.bgmainvs2018clade
-	#clade2018.filt.accgene.mat = clade2018.accgene.mat[var.in.mainclade | contrast.mainvsbgclade,]
-	#bgmainclade.filt.accgene.mat = bgmainclade.accgene.mat[var.in.mainclade | contrast.mainvsbgclade,]
+		refclade = read.tree(nfrefclade)
+		testclade = read.tree(nftestclade)
 
-	# 2018 (clade with only and almost all 2018 isolates) vs the bg of new
-	clade2018.accgene.mat = panamat[,clade2018.cols]
-	bgnewclade.accgene.mat = panamat[, bgnewclade.cols]
-	accgene.freq.bgnew = apply(bgnewclade.accgene.mat, 1, sum) / length(bgnewclade.cols)
-	accgene.freq.2018 = apply(clade2018.accgene.mat, 1, sum) / length(clade2018.cols)
-	uniquevar.2018vsbgnewclade = (accgene.freq.2018>0.8 & accgene.freq.bgnew<0.2)
-	uniquevar.bgnewvs2018clade = (accgene.freq.bgnew>0.8 & accgene.freq.2018<0.2)
-	contrast.2018vsbgnewclade = uniquevar.2018vsbgnewclade | uniquevar.bgnewvs2018clade
-	#clade2018.filt.accgene.mat = clade2018.accgene.mat[var.in.mainclade | contrast.2018vsbgnewclade,]
-	#bgnewclade.filt.accgene.mat = bgnewclade.accgene.mat[var.in.mainclade | contrast.2018vsbgnewclade,]
+		refclade.cols = laneid2col(refclade[['tip.label']])
+		testclade.cols = laneid2col(testclade[['tip.label']])
 
-	#fixed.panag = which(accgene.freq.prev>0.8 | accgene.freq.new>0.8 | accgene.freq.2018>0.8 | accgene.freq.bgnew>0.8)
-	combined.contrasts = which(contrast.mainvsbgclade | contrast.newvsprevclade | contrast.2018vsbgnewclade)
+		refclade.cols = intersect(sapply(refclade$tip.label, sanglane2assid, outidset=colpanaroo2isol), colpanaroo2isol)
+		testclade.cols = intersect(sapply(testclade$tip.label, sanglane2assid, outidset=colpanaroo2isol), colpanaroo2isol)
 
-	constrasts = list(bgVSmain=contrast.mainvsbgclade,
-					  prevVSnew=contrast.newvsprevclade,
-					  bgnewVS2018=contrast.2018vsbgnewclade,
-					  allcontrasts=combined.contrasts)
-	for (contrasttag in names(constrasts)){
-	  fixed.panag = constrasts[[contrasttag]]
-	  fixed.panag.info = cbind(pananames[fixed.panag],
-							  accgene.freq.bg[fixed.panag], accgene.freq.main[fixed.panag],
-							  accgene.freq.prev[fixed.panag], accgene.freq.new[fixed.panag],
-							  accgene.freq.bgnew[fixed.panag], accgene.freq.2018[fixed.panag])
-	  outcols = paste0(npanatab, c("", ".freq.bgH.clade", ".freq.H89.clade", ".freq.H9ef.clade", ".freq.H9gh.clade", ".freq.H9g.clade", ".freq.H9h.clade"))
-	  colnames(fixed.panag.info) = outcols
-      if (!is.null(panannot)){ 
-		  fixed.panag.info = cbind(fixed.panag.info, panannot[fixed.panag,]) 
-	      colnames(fixed.panag.info) = c(outcols, c("Annotation", refltcol))
-		  fixed.panag.info = fixed.panag.info[order(fixed.panag.info[,refltcol]),]
+		# ref clade (may include test clade) vs background (rest of the tree)
+		bgfull.cols = setdiff(fulltree.cols, refclade.cols)
+		refclade.accgene.mat = panamat[,refclade.cols]
+		bgfull.accgene.mat = panamat[, bgfull.cols]
+		accgene.freq.bgfull = apply(bgfull.accgene.mat, 1, sum) / length(bgfull.cols)
+		accgene.freq.ref = apply(refclade.accgene.mat, 1, sum) / length(refclade.cols)
+		uniquevar.bgfullvsref = (accgene.freq.bgfull>0.8 & accgene.freq.ref<0.2)
+		uniquevar.refvsbgfull = (accgene.freq.ref>0.8 & accgene.freq.bgfull<0.2)
+		accgenecontrast.refvsbgfull = uniquevar.refvsbgfull | uniquevar.bgfullvsref
+
+		# test clade vs background of ref clade (rest of the tree)
+		bgref.cols = setdiff(refclade.cols, testclade.cols)
+		print('bgref.cols')
+		print(bgref.cols)
+		testclade.accgene.mat = panamat[,testclade.cols]
+		bgref.accgene.mat = panamat[, bgref.cols]
+		accgene.freq.bgref = apply(bgref.accgene.mat, 1, sum) / length(bgref.cols)
+		accgene.freq.test = apply(testclade.accgene.mat, 1, sum) / length(testclade.cols)
+		uniquevar.bgrefvstest = (accgene.freq.bgref>0.8 & accgene.freq.test<0.2)
+		uniquevar.testvsbgref = (accgene.freq.test>0.8 & accgene.freq.bgref<0.2)
+		accgenecontrast.testvsbgref = uniquevar.bgrefvstest | uniquevar.testvsbgref
+
+		newaccgenecontrasts = list(accgenecontrast.refvsbgfull, accgenecontrast.testvsbgref)
+		names(newaccgenecontrasts) = c(sprintf("%s.vs.full", reftag), sprintf("%s.vs.%s", testtag, reftag))
+		accgenecontrasts = c(accgenecontrasts, newaccgenecontrasts)
+
+		newaccgenefreqvec = list(accgene.freq.ref, accgene.freq.bgfull, accgene.freq.test, accgene.freq.bgref)
+		names(newaccgenefreqvec) = paste("accgene.freq", c(reftag, bgfulltag, testtag, bgreftag), sep='.')
+		accgenefreqvec = c(accgenefreqvec, newaccgenefreqvec)
+
+		dataset.sizes = c(length(fulltree.cols), length(refclade.cols), length(bgfull.cols), length(testclade.cols), length(bgref.cols))
+		names(dataset.sizes) = c("full.tree", reftag, bgfulltag, testtag, bgreftag)
+		print("dataset sizes:")
+		print(dataset.sizes)
+	}
+	
+	testgenes = pananames %in% c('group_3132','group_7344','group_2300')
+	print(lapply(accgenefreqvec, function(agfv){ agfv[testgenes] }))
+	
+	for (accgenecontrasttag in names(accgenecontrasts)){
+	  fixed.accgenes = accgenecontrasts[[accgenecontrasttag]]
+	  fixed.accgenes.info = cbind(as.character(pananames[fixed.accgenes]),
+								  format(do.call(cbind, lapply(accgenefreqvec, function(agfv){ agfv[fixed.accgenes] })), digits=5))
+	  if (!is.null(panannot)){ 
+		  fixed.accgenes.info = cbind(fixed.accgenes.info, panannot[fixed.accgenes,])
+		  colnames(fixed.accgenes.info) = c("Gene", names(accgenefreqvec), colnames(panannot)) 
+	  }else{
+	  	 colnames(fixed.accgenes.info) = c("Gene", names(accgenefreqvec))  
 	  }
-	  write.table(format(fixed.panag.info, digits=5), file=paste0(dirpanaroo, sprintf("%s.fixed.panaroo_%s.tsv", contrasttag, npanatab)),
+	  write.table(fixed.accgenes.info, file=paste0(dirpanaroo, sprintf("%s.fixed.panaroo_%s.tsv", accgenecontrasttag, npanatab)),
 				  sep='\t', row.names=F, quote=FALSE)
 	}
 }
