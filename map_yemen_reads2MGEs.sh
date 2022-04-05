@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
 ### map reads to the MGEs
 
-export yemen=/lustre/scratch118/infgen/team216/fl4/yemen2019
-source ${yemen}/environ_yemen2019.sh
+export yemen=${PWD}/yemen2019
 
-if [[ ! -z "${1}" && -e "${1}" ]] ; then
-  readsetpath2datalist="${1}"
-  shift 1
-else
-  readsetpath2datalist=${yemen}/yemen2019_genomes_${sumdate}.path2data_list
-fi
 param="${@}"
 
 resume="$(echo ${param} | grep -o 'resume')"
@@ -37,12 +30,8 @@ for d in mapped_reads references ; do
 done
 
 module load trimmomatic/0.39--1
-#module load bwa/0.7.17=pl5.22.0_2
 module load bwa/0.7.17-r1188
-#module load samtools/1.9--h91753b0_8
 module load samtools/1.9
-#module load bcftools/1.9--h68d8f2e_9
-#module load vcftools/0.1.16-c4
 
 #ln -s "${incac}/plasmidfinder_IncAC_plasmid_33224_2#261_contig23.fna" ${yemen}/read_mapping/references/IncAC2_plasmid/IncAC2_plasmid_reference.fa
 #ln -s "${yemen}/Pasteur_seq/RND_CNRVC190243_consensus.fasta" ${yemen}/read_mapping/references/IncAC2_Pasteur/IncAC2_Pasteur_reference.fa
