@@ -83,6 +83,7 @@ for (npanatab in names(panatabs)){
 		panannot = panatab[midfreqs,c("Annotation", refltcol)]
 	}else{ panannot = NULL }
 	panamat = panamat[midfreqs,]
+	panamat.n = nrow(panamat)
 	pananames = panatab[midfreqs,1]
 	print(sprintf('    size of intermediate frequency (.02-.98) pangenome %s presence/absence matrix: %d, %d', npanatab, nrow(panamat), ncol(panamat)), quote=F)
 	
@@ -108,34 +109,78 @@ for (npanatab in names(panatabs)){
 		refclade.cols = intersect(sapply(refclade$tip.label, sanglane2assid, outidset=colpanaroo2isol), colpanaroo2isol)
 		testclade.cols = intersect(sapply(testclade$tip.label, sanglane2assid, outidset=colpanaroo2isol), colpanaroo2isol)
 
-		# ref clade (may include test clade) vs background (rest of the tree)
+		## ref clade (may include test clade) vs background (rest of the tree)
+		# bg
 		bgfull.cols = setdiff(fulltree.cols, refclade.cols)
-		refclade.accgene.mat = panamat[,refclade.cols]
 		bgfull.accgene.mat = panamat[, bgfull.cols]
-		accgene.freq.bgfull = apply(bgfull.accgene.mat, 1, sum) / length(bgfull.cols)
-		accgene.freq.ref = apply(refclade.accgene.mat, 1, sum) / length(refclade.cols)
+		bgfull.N = length(bgfull.cols)
+		accgene.count.bgfull = apply(bgfull.accgene.mat, 1, sum)
+		accgene.freq.bgfull = accgene.count.bgfull / bgfull.N
+		accgene.contingtab.bgfull = cbind(accgene.count.bgfull, bgfull.N - accgene.count.bgfull)
+		# test
+		refclade.accgene.mat = panamat[,refclade.cols]
+		refclade.N = length(refclade.cols)
+		accgene.count.ref = apply(refclade.accgene.mat, 1, sum)
+		accgene.freq.ref = accgene.count.ref / refclade.N
+		accgene.contingtab.ref = cbind(accgene.count.ref, refclade.N - accgene.count.ref)
+		# threshold criterion
 		uniquevar.bgfullvsref = (accgene.freq.bgfull>0.8 & accgene.freq.ref<0.2)
 		uniquevar.refvsbgfull = (accgene.freq.ref>0.8 & accgene.freq.bgfull<0.2)
-		accgenecontrast.refvsbgfull = uniquevar.refvsbgfull | uniquevar.bgfullvsref
+		# Fisher's exact test
+		fisher.refvsbgfull = lapply(1:panamat.n, function(i){
+			accgene.contingtab.refvsbgfull = c(accgene.contingtab.bgfull[i,], accgene.contingtab.ref[i,])
+			fisher.test(matrix(accgene.contingtab.refvsbgfull, 2, 2, byrow=T))
+		})
+		signif.fisher.refvsbgfull = sapply(fisher.refvsbgfull, function(x){
+			# use Bonferonni correction for multiple testing
+			(x$p.value * panamat.n) <= 0.05
+		})
+		OR.fisher.refvsbgfull = sapply(fisher.refvsbgfull, function(x){ x$estimate })
+		pv.fisher.refvsbgfull = sapply(fisher.refvsbgfull, function(x){ x$p.value })
+		# synthesis
+		accgenecontrast.refvsbgfull = uniquevar.refvsbgfull | uniquevar.bgfullvsref & signif.fisher.refvsbgfull
 
-		# test clade vs background of ref clade (rest of the tree)
+		## test clade vs background of ref clade (rest of the tree)
+		# bg
 		bgref.cols = setdiff(refclade.cols, testclade.cols)
-		print('bgref.cols')
-		print(bgref.cols)
-		testclade.accgene.mat = panamat[,testclade.cols]
 		bgref.accgene.mat = panamat[, bgref.cols]
-		accgene.freq.bgref = apply(bgref.accgene.mat, 1, sum) / length(bgref.cols)
-		accgene.freq.test = apply(testclade.accgene.mat, 1, sum) / length(testclade.cols)
+		bgref.N = length(bgref.cols)
+		accgene.count.bgref = apply(bgref.accgene.mat, 1, sum)
+		accgene.freq.bgref = accgene.count.bgref / bgref.N
+		accgene.contingtab.bgref = cbind(accgene.count.bgref, bgref.N - accgene.count.bgref)
+		# test
+		testclade.accgene.mat = panamat[,testclade.cols]
+		testclade.N = length(testclade.cols)
+		accgene.count.test = apply(testclade.accgene.mat, 1, sum)
+		accgene.freq.test = accgene.count.test / testclade.N
+		accgene.contingtab.test = cbind(accgene.count.test, testclade.N - accgene.count.test)
+		# threshold criterion
 		uniquevar.bgrefvstest = (accgene.freq.bgref>0.8 & accgene.freq.test<0.2)
 		uniquevar.testvsbgref = (accgene.freq.test>0.8 & accgene.freq.bgref<0.2)
-		accgenecontrast.testvsbgref = uniquevar.bgrefvstest | uniquevar.testvsbgref
+		# Fisher's exact test
+		fisher.testvsbgref = lapply(1:panamat.n, function(i){
+			accgene.contingtab.testvsbgref = c(accgene.contingtab.bgref[i,], accgene.contingtab.test[i,])
+			fisher.test(matrix(accgene.contingtab.testvsbgref, 2, 2, byrow=T))
+		})
+		signif.fisher.testvsbgref = sapply(fisher.testvsbgref, function(x){
+			# use Bonferonni correction for multiple testing
+			(x$p.value * panamat.n) <= 0.05
+		})
+		OR.fisher.testvsbgref = t(sapply(fisher.testvsbgref, function(x){ x$estimate }))
+		pv.fisher.testvsbgref = t(sapply(fisher.testvsbgref, function(x){ x$p.value }))
+		# synthesis
+		accgenecontrast.testvsbgref = uniquevar.bgrefvstest | uniquevar.testvsbgref & signif.fisher.testvsbgref
 
 		newaccgenecontrasts = list(accgenecontrast.refvsbgfull, accgenecontrast.testvsbgref)
-		names(newaccgenecontrasts) = c(sprintf("%s.vs.full", reftag), sprintf("%s.vs.%s", testtag, reftag))
+		vstags = c(sprintf("%s.vs.%s", reftag, bgfulltag), sprintf("%s.vs.%s", testtag, bgreftag))
+		names(newaccgenecontrasts) = vstags
 		accgenecontrasts = c(accgenecontrasts, newaccgenecontrasts)
 
-		newaccgenefreqvec = list(accgene.freq.ref, accgene.freq.bgfull, accgene.freq.test, accgene.freq.bgref)
-		names(newaccgenefreqvec) = paste("accgene.freq", c(reftag, bgfulltag, testtag, bgreftag), sep='.')
+		newaccgenefreqvec = list(accgene.freq.ref, accgene.freq.bgfull, OR.fisher.refvsbgfull, pv.fisher.refvsbgfull, 
+								 accgene.freq.test, accgene.freq.bgref, OR.fisher.testvsbgref, pv.fisher.testvsbgref)
+		names(newaccgenefreqvec) = paste(c(rep("accgene.freq", 2), 'OR', 'Fisher.p'), 
+										 c(reftag, bgfulltag, rep(vstags[1], 2), testtag, bgreftag, rep(vstags[2], 2)),
+										 sep='.')
 		accgenefreqvec = c(accgenefreqvec, newaccgenefreqvec)
 
 		dataset.sizes = c(length(fulltree.cols), length(refclade.cols), length(bgfull.cols), length(testclade.cols), length(bgref.cols))
@@ -144,8 +189,8 @@ for (npanatab in names(panatabs)){
 		print(dataset.sizes)
 	}
 	
-	testgenes = pananames %in% c('group_3132','group_7344','group_2300')
-	print(lapply(accgenefreqvec, function(agfv){ agfv[testgenes] }))
+#	testgenes = pananames %in% c('group_3132','group_7344','group_2300')
+#	print(lapply(accgenefreqvec, function(agfv){ agfv[testgenes] }))
 	
 	for (accgenecontrasttag in names(accgenecontrasts)){
 	  fixed.accgenes = accgenecontrasts[[accgenecontrasttag]]
